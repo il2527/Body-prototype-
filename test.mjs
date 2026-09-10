@@ -1,0 +1,91 @@
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
+import {server} from './server.mjs';
+
+const html=await readFile(new URL('./index.html',import.meta.url),'utf8');
+const script=html.split('<script type="module">')[1].split('</script>')[0];
+const elements=new Map();
+const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,classList:{toggle(name,value){this[name]=value;}},setAttribute(){}});return elements.get(id);};
+let now=10000;
+const context=vm.createContext({document:{hidden:false,getElementById:element},location:{hash:'',origin:'http://localhost'},URLSearchParams,URL,performance:{now:()=>now},setInterval(){},addEventListener(){},console});
+vm.runInContext(script,context);
+const run=s=>vm.runInContext(s,context);
+assert.equal(run('classifyHands([])'),'none');
+const point=(x,y)=>({x,y,z:0});
+const hand=()=>Array.from({length:21},()=>point(.5,.6));
+const circle=hand();circle[0]=point(.5,.9);circle[9]=point(.5,.65);circle[5]=point(.4,.65);circle[17]=point(.65,.65);circle[4]=point(.35,.5);circle[8]=point(.36,.5);circle[3]=point(.32,.62);circle[6]=point(.45,.58);
+for(const [tip,joint,x] of [[12,10,.5],[16,14,.6],[20,18,.7]]){circle[tip]=point(x,.3);circle[joint]=point(x,.5);}
+context.fixture=[circle];assert.equal(run('classifyHands(fixture)'),'circle');
+const open=structuredClone(circle);open[4]=point(.15,.7);context.fixture=[open];assert.equal(run('classifyHands(fixture)'),'none');
+const left=hand(),right=hand();for(const [h,x] of [[left,.3],[right,.7]]){h[0]=point(x,.8);h[9]=point(x,.55);h[5]=point(x-.07,.55);h[17]=point(x+.07,.55);h[6]=point(x,.38);}
+left[8]=point(.49,.4);right[8]=point(.51,.4);left[4]=point(.49,.6);right[4]=point(.51,.6);
+context.fixture=[left,right];assert.equal(run('classifyHands(fixture)'),'heart');
+const apart=structuredClone(right);apart[8]=point(.85,.4);context.fixture=[left,apart];assert.equal(run('classifyHands(fixture)'),'none');
+run("filterGesture('heart',1000)");assert.equal(run('localGesture'),'none');run("filterGesture('heart',1600)");assert.equal(run('localGesture'),'heart');run("filterGesture('circle',1650)");assert.equal(run('localGesture'),'none');run("filterGesture('none',1700)");assert.equal(run('localGesture'),'none');
+run("session={};signalingHealthy=true;lastPoll=10000;pc={connectionState:'connected'};channel={readyState:'open'};detectorReady=true;paused=false;");
+for(const a of ['none','heart','circle'])for(const b of ['none','heart','circle']){
+  context.a=a;context.b=b;run('localGesture=a;remoteGesture=b;localAt=remoteAt=10000;matchSince=9000;updateResult()');
+  assert.equal(element('result').classList.matched,a!=='none'&&a===b,`${a}/${b}`);
+}
+run("localGesture=remoteGesture='heart';localAt=remoteAt=10000;matchSince=9000;paused=true;updateResult()");assert.equal(element('result').classList.matched,false);
+run("paused=false;remoteAt=7000;matchSince=9000;updateResult()");assert.equal(element('result').classList.matched,false);
+run("remoteAt=10000;localAt=7000;matchSince=9000;updateResult()");assert.equal(element('result').classList.matched,false);
+run("localAt=10000;pc.connectionState='disconnected';matchSince=9000;updateResult()");assert.equal(element('result').classList.matched,false);
+run("pc.connectionState='connected';signalingHealthy=false;matchSince=9000;updateResult()");assert.equal(element('result').classList.matched,false);
+run("signalingHealthy=true;document.hidden=true;matchSince=9000;updateResult()");assert.equal(element('result').classList.matched,false);
+console.log('PASS: shape fixtures, stability filtering, all gesture pairs, paused camera, stale data, disconnect and hidden page.');
+
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+const base=`http://127.0.0.1:${server.address().port}`;
+const api=async(action,auth={},extra={})=>{const response=await fetch(base+'/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,room:auth.room,token:auth.token,...extra})});return {status:response.status,data:await response.json()};};
+try{
+  const a=(await api('join')).data,b=(await api('join',{}, {room:a.room})).data;
+  assert.ok(a.token&&b.token&&a.token!==b.token);assert.equal(a.room,b.room);
+  const waiting=(await api('join',{}, {room:a.room})).data;assert.equal(waiting.peer,null);
+  assert.equal((await api('poll',a)).data.peer,b.id,'New arrivals must not disrupt a current call');
+  assert.equal((await api('poll',{room:a.room,token:'A'.repeat(32)})).status,410);
+  const snapshot=(await api('poll',a)).data;assert.equal(snapshot.peer,b.id);assert.equal(snapshot.epoch,b.epoch);
+  assert.equal((await api('signal',a,{epoch:a.epoch,signal:{type:'offer',sdp:'v=0'}})).status,409);
+  assert.equal((await api('signal',a,{epoch:b.epoch,signal:{type:'offer',sdp:'v=0'}})).status,200);
+  const received=(await api('poll',b)).data.messages;assert.equal(received.length,1);assert.equal(received[0].signal.sdp,'v=0');
+  assert.equal((await api('poll',b,{after:received[0].seq})).data.messages.length,0);
+  const next=(await api('hint',a,{epoch:snapshot.epoch})).data;assert.equal(next.hint,'circle');assert.equal((await api('poll',b)).data.round,next.round);
+  assert.equal((await fetch(base+'/server.mjs')).status,404);assert.equal((await fetch(base+'/.preview/cloudflared')).status,404);assert.equal((await fetch(base+'/')).status,200);
+  const hostile=await fetch(base+'/api',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://unrelated.example'},body:JSON.stringify({action:'join'})});assert.equal(hostile.status,403);
+  const wasm=await fetch(base+'/vendor/wasm/vision_wasm_internal.wasm');assert.equal(wasm.headers.get('content-type'),'application/wasm');assert.ok((await wasm.arrayBuffer()).byteLength>9000000);
+  assert.equal((await api('leave',a)).status,200);assert.equal((await api('poll',a)).status,410);assert.equal((await api('poll',b)).data.peer,waiting.id);
+  await api('leave',waiting);assert.equal((await api('poll',b)).data.peer,null);
+  const c=(await api('join',{}, {room:b.room})).data;assert.ok(c.token);assert.equal((await api('poll',b)).data.peer,c.id);
+  await api('leave',b);await api('leave',c);
+  // Four people: skip into the waiting pool, isolate pair signals/hints, never
+  // re-pair skipped participants, and reject duplicate/stale skip requests.
+  const p=(await api('join')).data,q=(await api('join',{}, {room:p.room})).data;
+  const r=(await api('join',{}, {room:p.room})).data;
+  const before=(await api('poll',p)).data;
+  const moved=(await api('skip',p,{epoch:before.epoch})).data;
+  assert.equal(moved.peer,r.id,'The skipper gets the next available person');
+  assert.equal((await api('poll',q)).data.peer,null,'Skipped person waits');
+  assert.equal((await api('poll',r)).data.peer,p.id);
+  assert.equal((await api('signal',p,{epoch:before.epoch,signal:{type:'offer',sdp:'old'}})).status,409);
+  assert.equal((await api('skip',p,{epoch:before.epoch})).status,409,'A retry cannot skip the new partner');
+  assert.equal((await api('poll',p)).data.peer,r.id);
+  await api('signal',p,{epoch:moved.epoch,signal:{type:'offer',sdp:'new partner only'}});
+  assert.equal((await api('poll',q)).data.messages.length,0);
+  assert.equal((await api('poll',r)).data.messages[0].signal.sdp,'new partner only');
+  const changedHint=(await api('hint',p,{epoch:moved.epoch})).data;
+  assert.equal((await api('poll',r)).data.round,changedHint.round);
+  assert.equal((await api('poll',q)).data.hint,'heart','Hints stay within the current pair');
+  const alone=(await api('skip',p,{epoch:moved.epoch})).data;assert.equal(alone.peer,null);
+  for(let i=0;i<3;i++)assert.equal((await api('poll',p)).data.peer,null,'Do not recycle skipped people');
+  const other=(await api('join',{}, {room:p.room})).data;
+  assert.equal((await api('poll',p)).data.peer,other.id,'A new arrival ends the wait');
+  const current=(await api('poll',p)).data;
+  await api('signal',p,{epoch:current.epoch,signal:{type:'offer',sdp:'clear me'}});
+  await api('skip',other,{epoch:current.epoch});
+  assert.equal((await api('poll',p)).data.peer,null,'Either participant can skip');
+  assert.equal((await api('poll',other)).data.messages.length,0,'Clear old signaling on skip');
+  for(const person of [p,q,r,other])await api('leave',person);
+  console.log('PASS: skip priority, waiting queue, no repeat partners, new arrivals, pair privacy, stale request rejection and either-person skip.');
+  console.log('PASS: two-device room join, capacity, authentication, signal delivery/ack, epochs, shared hints, leave/rejoin, origin rejection, private file isolation and WASM serving.');
+}finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
