@@ -57,3 +57,15 @@ Tests cover synthetic shape fixtures, gesture stabilization, every gesture pair,
 - [Temporary HTTPS preview tunnels](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/do-more-with-tunnels/trycloudflare/)
 
 MediaPipe Tasks Vision is pinned to version 0.10.21. The hand landmarker model is the official float16 v1 asset. See `vendor/NOTICE.md` for origins and licenses.
+
+
+## Match history and recognition updates
+
+Before joining, enter an optional display name (otherwise Guest). When a match is confirmed, Your matches saves both display names and the time in that browser’s local storage. Each pair is saved once per session, up to the latest 200 records. No camera images, audio, room invitation, or authentication token is stored in the history. Names are self-entered and not verified. Storage is specific to the browser and website address; clearing website data clears the history. If storage is blocked, records last only for the current visit, and the page explains this.
+
+Detected labels no longer name the gesture, but matching still compares heart vs circle internally. OK-circle recognition allows a second hand in view and one relaxed outer finger. Tracking uses MediaPipe’s default confidence thresholds and the full camera frame is shown without cropping. Remote updates include sequence numbers and tracker status to avoid older packets overwriting newer detections and distinguish missing hands from a loading or failed tracker. These changes are covered by synthetic and state tests; real camera accuracy still needs testing by both participants.
+
+
+### Sharing from the local preview
+
+Run `node start-sharing.mjs` alongside `node server.mjs` to start the bundled temporary HTTPS tunnel. The launcher updates the server’s invite origin automatically. Copy invite link can then be used from localhost without moving your existing room. Keep both processes running. If sharing stops, rerun the launcher; new invite links use the new address. Old temporary links may expire.

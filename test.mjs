@@ -6,9 +6,10 @@ import {server} from './server.mjs';
 const html=await readFile(new URL('./index.html',import.meta.url),'utf8');
 const script=html.split('<script type="module">')[1].split('</script>')[0];
 const elements=new Map();
-const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,classList:{toggle(name,value){this[name]=value;}},setAttribute(){}});return elements.get(id);};
+const element=id=>{if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,classList:{toggle(name,value){this[name]=value;}},setAttribute(){},replaceChildren(){this.children=[];},append(...items){this.children=(this.children||[]).concat(items);}});return elements.get(id);};
 let now=10000;
-const context=vm.createContext({document:{hidden:false,getElementById:element},location:{hash:'',origin:'http://localhost'},URLSearchParams,URL,performance:{now:()=>now},setInterval(){},addEventListener(){},console});
+const storage=new Map();
+const context=vm.createContext({localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},document:{hidden:false,getElementById:element,createElement:()=>({append(...items){this.children=items;}})},location:{hash:'',origin:'http://localhost'},URLSearchParams,URL,performance:{now:()=>now},setInterval(){},addEventListener(){},console});
 vm.runInContext(script,context);
 const run=s=>vm.runInContext(s,context);
 assert.equal(run('classifyHands([])'),'none');
@@ -18,6 +19,8 @@ const circle=hand();circle[0]=point(.5,.9);circle[9]=point(.5,.65);circle[5]=poi
 for(const [tip,joint,x] of [[12,10,.5],[16,14,.6],[20,18,.7]]){circle[tip]=point(x,.3);circle[joint]=point(x,.5);}
 context.fixture=[circle];assert.equal(run('classifyHands(fixture)'),'circle');
 const open=structuredClone(circle);open[4]=point(.15,.7);context.fixture=[open];assert.equal(run('classifyHands(fixture)'),'none');
+context.fixture=[circle,open];assert.equal(run('classifyHands(fixture)'),'circle','A second hand must not hide an OK circle');
+const relaxed=structuredClone(circle);relaxed[20]=point(.7,.7);context.fixture=[relaxed];assert.equal(run('classifyHands(fixture)'),'circle','Allow one relaxed outer finger');
 const left=hand(),right=hand();for(const [h,x] of [[left,.3],[right,.7]]){h[0]=point(x,.8);h[9]=point(x,.55);h[5]=point(x-.07,.55);h[17]=point(x+.07,.55);h[6]=point(x,.38);}
 left[8]=point(.49,.4);right[8]=point(.51,.4);left[4]=point(.49,.6);right[4]=point(.51,.6);
 context.fixture=[left,right];assert.equal(run('classifyHands(fixture)'),'heart');
@@ -34,13 +37,30 @@ run("remoteAt=10000;localAt=7000;matchSince=9000;updateResult()");assert.equal(e
 run("localAt=10000;pc.connectionState='disconnected';matchSince=9000;updateResult()");assert.equal(element('result').classList.matched,false);
 run("pc.connectionState='connected';signalingHealthy=false;matchSince=9000;updateResult()");assert.equal(element('result').classList.matched,false);
 run("signalingHealthy=true;document.hidden=true;matchSince=9000;updateResult()");assert.equal(element('result').classList.matched,false);
+run("document.hidden=false;session={id:'local-person',name:'Alex'};peerId='remote-person';peerName='Jordan';localGesture=remoteGesture='circle';localAt=remoteAt=10000;matchSince=9000;updateResult();updateResult()");
+assert.equal(element('localGesture').textContent,'Detected');assert.equal(element('remoteGesture').textContent,'Detected');
+let records=JSON.parse(storage.get('samewave.matches.v1'));assert.equal(records.length,1);assert.equal(records[0].you,'Alex');assert.equal(records[0].person,'Jordan');assert.ok(records[0].at);assert.equal('token' in records[0],false);
+run('loadMatches()');assert.equal(run('matchHistory.length'),1,'Match history survives reloading storage');
+run("remoteGesture='heart';updateResult()");assert.equal(run('matchHistory.length'),1,'Different gestures do not save a match');
+run("bindChannel({});round=42");
+run(`channel.onmessage({data:JSON.stringify({type:'gesture',round:42,sequence:10,gesture:'circle',camera:true,tracking:'ready',hands:1})})`);
+assert.equal(run('remoteGesture'),'circle');
+run(`channel.onmessage({data:JSON.stringify({type:'gesture',round:42,sequence:9,gesture:'heart',camera:true,tracking:'ready',hands:2})})`);
+assert.equal(run('remoteGesture'),'circle','Ignore out-of-order detection packets');
+run(`channel.onmessage({data:JSON.stringify({type:'gesture',round:42,sequence:11,gesture:'circle',camera:true,tracking:'error',hands:0})})`);
+assert.equal(run('remoteGesture'),'none');assert.match(element('remoteStatus').textContent,/needs attention/);
+console.log('PASS: generic labels, persistent match names/time, duplicate prevention, second-hand circles, relaxed fingers and remote tracking status/sequence.');
 console.log('PASS: shape fixtures, stability filtering, all gesture pairs, paused camera, stale data, disconnect and hidden page.');
 
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const base=`http://127.0.0.1:${server.address().port}`;
 const api=async(action,auth={},extra={})=>{const response=await fetch(base+'/api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,room:auth.room,token:auth.token,...extra})});return {status:response.status,data:await response.json()};};
 try{
-  const a=(await api('join')).data,b=(await api('join',{}, {room:a.room})).data;
+  const a=(await api('join',{}, {name:'Alex'})).data,b=(await api('join',{}, {room:a.room,name:'Jordan'})).data;
+  assert.equal(a.name,'Alex');assert.equal(b.peerName,'Alex');assert.equal((await api('poll',a)).data.peerName,'Jordan');
+  assert.equal((await api('share',a)).data.publicOrigin,a.publicOrigin);
+  assert.equal((await api('share')).status,401);
+  assert.equal((await fetch(base+'/.preview/public-origin.json')).status,404);
   assert.ok(a.token&&b.token&&a.token!==b.token);assert.equal(a.room,b.room);
   const waiting=(await api('join',{}, {room:a.room})).data;assert.equal(waiting.peer,null);
   assert.equal((await api('poll',a)).data.peer,b.id,'New arrivals must not disrupt a current call');

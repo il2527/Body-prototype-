@@ -9,7 +9,11 @@ const rooms=new Map(), limits=new Map();
 const id=()=>randomBytes(24).toString('base64url');
 const valid=s=>typeof s==='string'&&/^[A-Za-z0-9_-]{32}$/.test(s);
 const fail=(status,message)=>{throw Object.assign(new Error(message),{status});};
-const publicOrigin=process.env.PUBLIC_ORIGIN||'';
+async function getPublicOrigin(){
+  let value=process.env.PUBLIC_ORIGIN||'';
+  if(!value)try{value=JSON.parse(await readFile(path.join(root,'.preview/public-origin.json'),'utf8')).origin;}catch{}
+  try{const url=new URL(value);return url.protocol==='https:'&&!url.username&&!url.password?url.origin:'';}catch{return '';}
+}
 const iceServers=[{urls:'stun:stun.cloudflare.com:3478'}];
 if(process.env.TURN_URL&&process.env.TURN_USERNAME&&process.env.TURN_CREDENTIAL)iceServers.push({urls:process.env.TURN_URL.split(','),username:process.env.TURN_USERNAME,credential:process.env.TURN_CREDENTIAL});
 function resetMember(room,member){member.peer=null;member.epoch=++room.epoch;member.messages=[];member.hint='heart';member.round=member.epoch;}
@@ -18,7 +22,7 @@ function pairWaiting(room,preferred=null){const waiting=[...room.members.entries
   for(let i=0;i<waiting.length;i++){const [token,a]=waiting[i];if(a.peer)continue;const next=waiting.slice(i+1).find(([,b])=>!b.peer&&!a.skipped.has(b.id)&&!b.skipped.has(a.id));if(!next)continue;const [otherToken,b]=next;const epoch=++room.epoch;a.peer=otherToken;b.peer=token;for(const m of [a,b]){m.epoch=epoch;m.round=epoch;m.hint='heart';m.messages=[];}}
 }
 function clean(room){for(const [token,m] of room.members)if(Date.now()-m.seen>20000){unpair(room,m);room.members.delete(token);}pairWaiting(room);}
-function snapshot(room,member,after=0){const peer=room.members.get(member.peer);return {id:member.id,peer:peer?.id||null,initiator:peer?member.id<peer.id:false,epoch:member.epoch,hint:member.hint,round:member.round,waiting:!peer,participants:room.members.size,messages:member.messages.filter(m=>m.seq>after)};}
+function snapshot(room,member,after=0){const peer=room.members.get(member.peer);return {id:member.id,peer:peer?.id||null,name:member.name,peerName:peer?.name||null,initiator:peer?member.id<peer.id:false,epoch:member.epoch,hint:member.hint,round:member.round,waiting:!peer,participants:room.members.size,messages:member.messages.filter(m=>m.seq>after)};}
 export const server=http.createServer(async(req,res)=>{
   res.setHeader('X-Content-Type-Options','nosniff');
   res.setHeader('Referrer-Policy','no-referrer');
@@ -27,6 +31,7 @@ export const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://localhost');
     if(url.pathname==='/api'&&req.method==='POST'){
+      const publicOrigin=await getPublicOrigin();
       const origin=req.headers.origin;
       if(origin&&origin!==publicOrigin&&new URL(origin).host!==req.headers.host)fail(403,'This request must come from the room page.');
       if(!(req.headers['content-type']||'').startsWith('application/json'))fail(415,'JSON required.');
@@ -38,13 +43,14 @@ export const server=http.createServer(async(req,res)=>{
         const key=data.room||id();if(!valid(key))fail(400,'Invalid room link.');
         let room=rooms.get(key);if(!room){if(rooms.size>=100)fail(503,'All rooms are busy. Try later.');room={members:new Map(),epoch:0,hint:'heart',round:1,updated:now};rooms.set(key,room);}
         clean(room);if(room.members.size>=20)fail(409,'This room is full. Try again when someone leaves.');
-        const token=id(),member={id:id(),seen:now,messages:[],seq:0,peer:null,skipped:new Set()};resetMember(room,member);room.members.set(token,member);room.updated=now;pairWaiting(room);
+        const token=id(),member={id:id(),name:typeof data.name==='string'?data.name.trim().replace(/[\u0000-\u001f\u007f]/g,'').slice(0,40)||'Guest':'Guest',seen:now,messages:[],seq:0,peer:null,skipped:new Set()};resetMember(room,member);room.members.set(token,member);room.updated=now;pairWaiting(room);
         return json(200,{...snapshot(room,member),room:key,token,iceServers,relayConfigured:iceServers.length>1,publicOrigin});
       }
       if(!valid(data.room)||!valid(data.token))fail(401,'Join the room first.');
       const room=rooms.get(data.room);if(!room)fail(410,'Room expired. Join again.');clean(room);
       const member=room.members.get(data.token);if(!member)fail(410,'You left or disconnected. Join again.');
       member.seen=room.updated=Date.now();
+      if(data.action==='share')return json(200,{publicOrigin});
       if(data.action==='poll'){
         const after=Number.isSafeInteger(data.after)&&data.after>=0?data.after:0;
         member.messages=member.messages.filter(m=>m.seq>after);
