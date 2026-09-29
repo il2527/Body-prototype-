@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A gentle, reflective body check-in prototype for dancers.">
+    <title>Listen to Your Body</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="app-shell" aria-labelledby="screen-title">
+      <header class="app-header">
+        <a class="brand" href="#" id="home-link" aria-label="Return to the beginning">listen</a>
+        <p class="step-label" id="step-label" aria-live="polite"></p>
+        <button class="quiet-button" id="sound-toggle" type="button" aria-pressed="false">Sound off</button>
+      </header>
+
+      <section class="screen" id="screen" aria-live="polite"></section>
+
+      <footer class="progress-wrap" aria-label="Check-in progress">
+        <div class="progress-track"><span id="progress-bar"></span></div>
+      </footer>
+    </main>
+
+    <template id="dancer-template">
+      <div class="dancer-scene" aria-label="A dancer taking a slow breath">
+        <div class="breath-ring ring-one" aria-hidden="true"></div>
+        <div class="breath-ring ring-two" aria-hidden="true"></div>
+        <svg class="dancer" viewBox="0 0 260 440" role="img" aria-label="A softly moving dancer silhouette">
+          <title>A dancer silhouette</title>
+          <g class="dancer-figure">
+            <circle class="dancer-fill" cx="131" cy="56" r="27" />
+            <path class="dancer-fill" d="M115 87c-12 19-17 45-14 75l8 68-28 124h31l22-93 20 93h31l-32-126 3-67c2-31-4-57-16-74z" />
+            <path class="dancer-stroke" d="M115 106C88 124 70 151 50 174M150 105c28-3 52-20 71-43" />
+            <path class="dancer-stroke" d="M82 354c-13 24-26 37-44 43M184 354c15 21 31 33 48 36" />
+          </g>
+          <g class="hotspots" id="scan-hotspots" aria-label="Body areas"></g>
+        </svg>
+        <p class="body-caption" id="body-caption"></p>
+      </div>
+    </template>
+
+    <template id="body-map-template">
+      <div class="map-figure" aria-label="Your body map">
+        <svg class="dancer map-dancer" viewBox="0 0 260 440" role="img" aria-label="Dancer silhouette with selected body areas">
+          <title>Your body today</title>
+          <g class="dancer-figure">
+            <circle class="dancer-fill" cx="131" cy="56" r="27" />
+            <path class="dancer-fill" d="M115 87c-12 19-17 45-14 75l8 68-28 124h31l22-93 20 93h31l-32-126 3-67c2-31-4-57-16-74z" />
+            <path class="dancer-stroke" d="M115 106C88 124 70 151 50 174M150 105c28-3 52-20 71-43" />
+            <path class="dancer-stroke" d="M82 354c-13 24-26 37-44 43M184 354c15 21 31 33 48 36" />
+          </g>
+          <g id="map-markers"></g>
+        </svg>
+      </div>
+    </template>
+  </body>
+</html>
