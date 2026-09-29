@@ -4,6 +4,7 @@ An interactive media prototype for dancers to pause, notice, and reflect on how 
 
 ## Original idea
 
+When someone selects the places in their body that feel uncomfortable, the experience should guide them to describe and rate those feelings, then show a calm visual summary of their body today.
 The experience follows a gentle sequence:
 
 **Arrive → Breathe → Sleep → Listen → Describe → Rate → Reflect → Return**
@@ -47,6 +48,6 @@ These prompts guided the translation of the concept into a standalone HTML, CSS,
 
 ## Reflection
 
-This project helped me think about the difference between collecting body data and creating a moment of attention. The most important decision was to avoid clinical language and alarming feedback. Instead of telling a dancer that something is “wrong,” the experience says, “Thank you for noticing.”
+The final experience met my goal of helping users identify sore areas, rate intensity, and visualize how their body feels each day. However, the feedback after symptoms were reported did not always feel medically professional. Since this is a self-awareness tool rather than a diagnostic system, future versions should use validated health information or keep feedback neutral and encourage professional support when needed.
 
-I also learned that a visual interface can shape emotional tone. The warm colors, slow breathing motion, and soft body points make the check-in feel less like a form and more like a personal ritual. Adding the full body-area list made the prototype more specific and usable, while keeping the dancer figure central. If I continued the project, I would test it with dancers to learn which body areas, words, and reflection messages feel most supportive.
+I also improved the interaction flow during development. Instead of asking users to complete questions one body part at a time, users now select all relevant areas first and then describe them together. AI helped me generate ideas and implement changes quickly, but I learned that I still need to guide the concept and design decisions clearly. I have not yet tested the weekly view with real data, so evaluating whether it communicates long-term patterns is an important next step.
